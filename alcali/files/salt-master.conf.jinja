@@ -1,0 +1,42 @@
+# Managed by Salt via alcali.master.
+master_job_cache: {{ master.returner }}
+event_return:
+  - {{ master.returner }}
+keep_jobs_seconds: {{ master.keep_jobs_seconds }}
+
+{% if master.returner == 'mysql' -%}
+mysql.host: {{ database.host|yaml_dquote }}
+mysql.user: {{ database.user|yaml_dquote }}
+mysql.pass: {{ database.password|yaml_dquote }}
+mysql.db: {{ database.name|yaml_dquote }}
+mysql.port: {{ database.port }}
+{% else -%}
+returner.postgres.host: {{ database.host|yaml_dquote }}
+returner.postgres.user: {{ database.user|yaml_dquote }}
+returner.postgres.passwd: {{ database.password|yaml_dquote }}
+returner.postgres.db: {{ database.name|yaml_dquote }}
+returner.postgres.port: {{ database.port }}
+{% endif %}
+
+rest_cherrypy:
+  host: {{ master.api.host|yaml_dquote }}
+  port: {{ master.api.port }}
+  debug: false
+  ssl_crt: {{ master.api.ssl_crt|yaml_dquote }}
+  ssl_key: {{ master.api.ssl_key|yaml_dquote }}
+
+netapi_enable_clients:
+{% for client in master.netapi_clients %}
+  - {{ client }}
+{% endfor %}
+
+keep_acl_in_token: true
+external_auth:
+  rest:
+    ^url: {{ master.rest_auth.verify_url|yaml_dquote }}
+{% for username, permissions in master.rest_auth.users|dictsort %}
+    {{ username }}:
+{% for permission in permissions %}
+      - {{ permission|yaml_squote }}
+{% endfor %}
+{% endfor %}

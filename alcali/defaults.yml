@@ -1,0 +1,101 @@
+# -*- coding: utf-8 -*-
+# vim: ft=yaml
+---
+alcali:
+  version: 3006.4.0.dev0
+  supported_osfingers:
+    - Debian-13
+    - Ubuntu-24.04
+  deploy:
+    repository: https://github.com/latenighttales/alcali.git
+    # Commit referenced by the upstream v3006.3.0 tag.
+    # Modernized candidate once published: 8f07bb66dff6428f833c838ab6f053e71ea16429
+    revision: 92dfc9af57e2fdff0d7f373fbc48be90b08167ec
+    force_reset: false
+    directory: /opt/alcali
+    code_directory: /opt/alcali/code
+    virtualenv: /opt/alcali/venv
+    user: alcali
+    group: alcali
+    shell: /usr/sbin/nologin
+    python: python3
+
+  database:
+    backend: mysql
+    name: salt
+    user: alcali
+    password: CHANGE_ME
+    host: 127.0.0.1
+    port: 3306
+
+  django:
+    secret_key: CHANGE_ME
+    allowed_hosts:
+      - 127.0.0.1
+    debug: false
+    auth_backend: null
+
+  salt_api:
+    url: https://127.0.0.1:8080
+    auth: rest
+    master_minion_id: master
+    verify_tls: true
+    ca_bundle: null
+    timeout: 30
+
+  features:
+    ldap: false
+    social: false
+
+  python_overrides: []
+
+  # Compatibility settings are applied only while deploy.revision references
+  # the original upstream release. They are skipped automatically for a fork.
+  legacy:
+    revision: 92dfc9af57e2fdff0d7f373fbc48be90b08167ec
+    python_overrides:
+      - Django==4.2.30
+
+  environment: {}
+
+  gunicorn:
+    bind: 127.0.0.1
+    port: 5000
+    workers: 4
+    timeout: 300
+
+  service:
+    name: alcali
+
+  salt_master:
+    # Opt-in because this changes and restarts security-sensitive master/API
+    # services. See README.md before enabling it.
+    manage: false
+    config_file: /etc/salt/master.d/alcali.conf
+    master_service: salt-master
+    api_service: salt-api
+    returner: mysql
+    install_connector: true
+    pip_bin: /opt/saltstack/salt/bin/pip3
+    remove_on_clean: false
+    keep_jobs_seconds: 604800
+    api:
+      host: 127.0.0.1
+      port: 8080
+      ssl_crt: /etc/salt/pki/api.crt
+      ssl_key: /etc/salt/pki/api.key
+    netapi_clients:
+      - local
+      - local_async
+      - runner
+      - runner_async
+      - wheel
+      - wheel_async
+    rest_auth:
+      verify_url: http://127.0.0.1:5000/api/token/verify/
+      users:
+        admin:
+          - '.*'
+          - '@runner'
+          - '@wheel'
+          - '@jobs'

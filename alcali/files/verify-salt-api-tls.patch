@@ -1,0 +1,26 @@
+--- a/api/backend/netapi.py
++++ b/api/backend/netapi.py
+@@ -10,14 +10,20 @@
+ from ..utils.input import RawCommand
+ from ..models import Minions, Functions, MinionsCustomFields, Keys, Schedule
+ 
+-urllib3.disable_warnings()
+-
+ url = os.environ.get("SALT_URL", "https://127.0.0.1:8080")
++verify_ssl = os.environ.get("SALT_VERIFY_SSL", "true").lower() not in (
++    "0",
++    "false",
++    "no",
++    "off",
++)
++if not verify_ssl:
++    urllib3.disable_warnings()
+ 
+ 
+ def api_connect():
+     user = get_current_user()
+-    api = Pepper(url, ignore_ssl_errors=True)
++    api = Pepper(url, ignore_ssl_errors=not verify_ssl)
+     try:
+         login_ret = api.login(
+             str(user.username),

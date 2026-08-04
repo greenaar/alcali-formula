@@ -1,0 +1,134 @@
+# -*- coding: utf-8 -*-
+# vim: ft=yaml
+---
+alcali:
+  # Formula target for the modernized application fork.
+  version: 3006.4.0.dev0
+  supported_osfingers:
+    - Debian-13
+    - Ubuntu-24.04
+
+  deploy:
+    repository: https://github.com/latenighttales/alcali.git
+    # Legacy source remains here until the modernized commit has a remote home.
+    # Modernized candidate: 8f07bb66dff6428f833c838ab6f053e71ea16429
+    revision: 92dfc9af57e2fdff0d7f373fbc48be90b08167ec
+    force_reset: false
+    directory: /opt/alcali
+    code_directory: /opt/alcali/code
+    virtualenv: /opt/alcali/venv
+    user: alcali
+    group: alcali
+    shell: /usr/sbin/nologin
+    python: python3
+
+  # This is the same database used by the Salt master job/event returner.
+  # Create it and load Salt's official returner schema before applying Alcali.
+  database:
+    backend: mysql             # mysql or postgresql
+    name: salt
+    user: alcali
+    password: REPLACE_WITH_A_LONG_RANDOM_PASSWORD
+    host: 127.0.0.1
+    port: 3306
+
+  django:
+    # Generate with: openssl rand -base64 48
+    secret_key: REPLACE_WITH_A_DIFFERENT_LONG_RANDOM_VALUE
+    allowed_hosts:
+      - alcali.example.com
+    debug: false
+    # null for local Django users, ldap, or social.
+    auth_backend: null
+
+  salt_api:
+    # Alcali's backend connects to this address. Keeping it on loopback is
+    # preferred when Alcali and the Salt master share a host.
+    url: https://127.0.0.1:8080
+    auth: rest
+    master_minion_id: salt-master.example.com
+    verify_tls: true
+    # ca_bundle: /etc/ssl/certs/internal-ca.pem
+    timeout: 30
+
+  features:
+    ldap: false
+    social: false
+
+  # Additional variables are written verbatim to /opt/alcali/.env. Examples:
+  environment: {}
+  # Set additional values when required, for example:
+  # environment:
+  #   CSRF_TRUSTED_ORIGINS: https://alcali.example.com
+  #   SESSION_COOKIE_SECURE: 'true'
+  #   CSRF_COOKIE_SECURE: 'true'
+  #   AUTH_LDAP_SERVER_URI: ldaps://ldap.example.com
+  #   AUTH_LDAP_BIND_DN: cn=alcali,ou=services,dc=example,dc=com
+  #   AUTH_LDAP_BIND_PASSWORD: REPLACE_ME
+  #   AUTH_LDAP_USER_BASE_CN: ou=people,dc=example,dc=com
+  #   AUTH_LDAP_USER_SEARCH_FILTER: '(uid=%(user)s)'
+  #   AUTH_LDAP_REQUIRE_GROUP: cn=salt-admins,ou=groups,dc=example,dc=com
+  #   AUTH_LDAP_START_TLS: 'false'
+  #   SOCIAL_AUTH_GOOGLE_OAUTH2_KEY: example.apps.googleusercontent.com
+  #   SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET: REPLACE_ME
+  #   SOCIAL_AUTH_REDIRECT_URI: https://alcali.example.com
+  #   SOCIAL_AUTH_GOOGLE_OAUTH2_WHITELISTED_DOMAINS: example.com
+
+  # Normally empty: the modernized application owns its supported dependency
+  # ranges. Use only for an intentional, tested emergency override.
+  python_overrides: []
+
+  gunicorn:
+    # Bind locally and publish through an authenticated TLS reverse proxy.
+    bind: 127.0.0.1
+    port: 5000
+    workers: 4
+    timeout: 300
+
+  service:
+    name: alcali
+
+  salt_master:
+    # Enable only after reading README.md. This manages the master job cache,
+    # event returner, salt-api, and eAuth configuration and restarts both
+    # salt-master and salt-api when it changes.
+    manage: false
+    config_file: /etc/salt/master.d/alcali.conf
+    master_service: salt-master
+    api_service: salt-api
+    returner: mysql            # mysql or postgres
+    install_connector: true
+    pip_bin: /opt/saltstack/salt/bin/pip3
+    keep_jobs_seconds: 604800  # seven days; 0 keeps jobs indefinitely
+    remove_on_clean: false
+
+    api:
+      host: 127.0.0.1
+      port: 8080
+      ssl_crt: /etc/salt/pki/api.crt
+      ssl_key: /etc/salt/pki/api.key
+
+    # Salt 3006 disables every netapi client unless explicitly enabled.
+    # Keep this to the clients actually required by your Alcali users.
+    netapi_clients:
+      - local
+      - local_async
+      - runner
+      - runner_async
+      - wheel
+      - wheel_async
+
+    rest_auth:
+      # The Salt master calls this endpoint to validate Alcali JWT tokens.
+      verify_url: http://127.0.0.1:5000/api/token/verify/
+      users:
+        admin:
+          - '.*'
+          - '@runner'
+          - '@wheel'
+          - '@jobs'
+        # A narrower example account:
+        operator:
+          - 'test.*'
+          - 'state.*'
+          - '@jobs'

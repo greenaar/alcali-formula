@@ -1,0 +1,9 @@
+name: alcali
+os: Debian, Raspbian, Ubuntu
+os_family: Debian
+version: 1.0.0
+release: 1
+minimum_version: 3006
+summary: 'alcali formula'
+description: 'This formula installs Alcali as a native systemd service. It creates an isolated Python environment, writes Alcali''s environment file, applies Django migrations, collects static assets, and runs Gunicorn as an unprivileged account.'
+top_level_dir: alcali
