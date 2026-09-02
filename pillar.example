@@ -9,7 +9,7 @@ alcali:
     - Ubuntu-24.04
 
   deploy:
-    # package:  install the published wheel from the Forgejo PyPI registry.
+    # package:  install a published wheel from a Python package registry.
     #           The deployed artifact is then exactly the one CI built and
     #           released, and no source checkout is kept on the minion.
     # source:   clone the repository and install its requirements. Required
@@ -24,7 +24,7 @@ alcali:
     package:
       # The wheel is fetched by exact file URL from this registry, so no
       # index is consulted for Alcali itself.
-      registry_url: https://forge.thatserver.ca/api/packages/salt/pypi
+      registry_url: https://forge.example.com/api/packages/alcali/pypi
       # Credentials for that registry. They are written to the deploy user's
       # netrc, never passed on a command line. A read-only token is enough.
       username: alcali-deploy
@@ -32,21 +32,21 @@ alcali:
       # Defaults to alcali:version when null.
       version: null
 
-    # Used by method: source only.
-    # Modernized application on the internal Forgejo instance.
-    repository: ssh://git@forge.thatserver.ca:8222/salt/alcali-modernized.git
+    # Used by method: source only. The default is the public repository over
+    # HTTPS, which needs neither identity nor known_host; this example shows
+    # the private-over-SSH case instead, where both are required.
+    repository: ssh://git@forge.example.com:8222/salt/alcali-modernized.git
     revision: 14fe53a19aacff688fdc98cffc43b665bb813baf    # tag v3008.2.0
     force_reset: false
-    # The repository is private, so the minion needs a read-only Forgejo
-    # deploy key. Ship it through the fileserver (0400, root-owned) or point
-    # at a key already present on the minion.
+    # A read-only deploy key. Ship it through the fileserver (0400,
+    # root-owned) or point at a key already present on the minion.
     identity: salt://alcali/files/deploy_key
     # Pinned so the first clone cannot be answered by an unknown host key.
     known_host:
-      name: forge.thatserver.ca
+      name: forge.example.com
       port: 8222
       enc: ssh-ed25519
-      fingerprint: SHA256:eE8cyFih/+oZvnUaQF7WAsbEpDt0p0/xncrEPUnbKyU
+      fingerprint: SHA256:REPLACE_WITH_THE_SCANNED_HOST_KEY_FINGERPRINT
     directory: /opt/alcali
     code_directory: /opt/alcali/code
     virtualenv: /opt/alcali/venv
@@ -106,8 +106,8 @@ alcali:
   # Used by deploy:method: docker only.
   docker:
     # Pin a version. Defaults to registry/alcali:<alcali:version> when null.
-    image: forge.thatserver.ca/salt/alcali:3008.2.0
-    registry: forge.thatserver.ca/salt
+    image: registry.example.com/alcali:3008.2.0
+    registry: registry.example.com
     # Written to /root/.docker/config.json, never passed to `docker login`.
     registry_username: alcali-deploy
     registry_password: REPLACE_WITH_A_READ_ONLY_REGISTRY_TOKEN

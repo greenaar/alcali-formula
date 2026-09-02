@@ -32,8 +32,10 @@
 {%- set extras = [] %}
 {%- if alcali.features.ldap %}{%- do extras.append('ldap') %}{%- endif %}
 {%- if alcali.features.social %}{%- do extras.append('social') %}{%- endif %}
-{#- Forgejo serves a package file at
-    {registry}/files/{name}/{version}/{filename}. Naming the wheel outright
+{#- The Forgejo and Gitea package registries serve a file at
+    {registry}/files/{name}/{version}/{filename}, which is what registry_url
+    is composed against; set deploy:package:url outright for any registry
+    that lays its files out differently. Naming the wheel outright
     means pip never queries an index for Alcali, so nothing published under
     the same name anywhere else can be selected instead. #}
 {%- set wheel_name = 'alcali-' ~ package_version ~ '-py3-none-any.whl' %}

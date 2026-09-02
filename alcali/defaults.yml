@@ -7,7 +7,7 @@ alcali:
     - Debian-13
     - Ubuntu-24.04
   deploy:
-    # package:  install the published wheel from the Forgejo PyPI registry.
+    # package:  install a published wheel from a Python package registry.
     #           The deployed artifact is then exactly the one CI built and
     #           released, and no source checkout is kept on the minion.
     # source:   clone the repository and install its requirements. Required
@@ -25,11 +25,15 @@ alcali:
     method: package
 
     package:
-      # Base URL of the Forgejo PyPI registry for the owner holding the
-      # package. The wheel is fetched by its exact file URL, so no index is
-      # consulted for Alcali itself and a package of the same name published
-      # elsewhere cannot shadow it. Dependencies still resolve normally.
-      registry_url: https://forge.thatserver.ca/api/packages/salt/pypi
+      # Base URL of the PyPI-compatible registry holding the wheel, e.g.
+      # https://forge.example.com/api/packages/<owner>/pypi. No wheel is
+      # published for this project publicly, so this has no default: set it to
+      # your own registry, or use method: source below.
+      #
+      # The wheel is fetched by its exact file URL, so no index is consulted
+      # for Alcali itself and a package of the same name published elsewhere
+      # cannot shadow it. Dependencies still resolve normally.
+      registry_url: null
       # Full wheel URL. Derived from registry_url and the version when null.
       url: null
       # Credentials for that registry. They are written to the deploy user's
@@ -40,8 +44,8 @@ alcali:
       version: null
 
     # Used by method: source only.
-    repository: ssh://git@forge.thatserver.ca:8222/salt/alcali-modernized.git
-    # Modernized application, release v3008.2.0 on the Forgejo repository.
+    repository: https://github.com/greenaar/alcali-modernized.git
+    # Modernized application, release v3008.2.0.
     # Upstream v3006.3.0 remains available as the legacy revision below.
     revision: 14fe53a19aacff688fdc98cffc43b665bb813baf
     force_reset: false
@@ -51,13 +55,16 @@ alcali:
     identity: null
     # Host key pinned for the deploy user before the first clone. Set name to
     # null when the repository is cloned over HTTPS.
+    # Not needed for the HTTPS repository above. Set name, port, enc and
+    # fingerprint when cloning over SSH, so an unexpected host key aborts the
+    # run instead of being trusted silently.
     known_host:
-      name: forge.thatserver.ca
-      port: 8222
+      name: null
+      port: 22
       enc: ssh-ed25519
       # Verified against the scanned key when set; null accepts what the
       # server presents on first contact.
-      fingerprint: SHA256:eE8cyFih/+oZvnUaQF7WAsbEpDt0p0/xncrEPUnbKyU
+      fingerprint: null
     directory: /opt/alcali
     code_directory: /opt/alcali/code
     virtualenv: /opt/alcali/venv
@@ -130,7 +137,9 @@ alcali:
     # Defaults to registry ~ '/alcali:' ~ version when null. Pin a version;
     # a floating tag makes it impossible to say what is deployed.
     image: null
-    registry: forge.thatserver.ca/salt
+    # No image is published for this project publicly; point this at your
+    # own registry, or build and load the image on the host yourself.
+    registry: null
     # Credentials for a private registry. Written to the root Docker config,
     # never passed on a command line.
     registry_username: null

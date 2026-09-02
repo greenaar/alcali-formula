@@ -8,23 +8,28 @@ account.
 ## Important project status
 
 The formula deploys the modernized `3008.2.0` application: Python 3.12,
-Django 5.2, Vue 3 and Vuetify 3. It is pinned to the fork hosted on the
-internal Forgejo instance:
+Django 5.2, Vue 3 and Vuetify 3. It is pinned to the
+[alcali-modernized](https://github.com/greenaar/alcali-modernized) fork:
 
 ```yaml
 alcali:
   deploy:
-    repository: ssh://git@forge.thatserver.ca:8222/salt/alcali-modernized.git
+    repository: https://github.com/greenaar/alcali-modernized.git
     revision: 14fe53a19aacff688fdc98cffc43b665bb813baf    # tag v3008.2.0
 ```
+
+No wheel or container image is published publicly for that fork, so
+`method: package` and `method: docker` need a registry of your own. Cloning
+the public repository with `method: source` is the path that needs no
+credentials at all.
 
 There are two installation methods, selected with `alcali:deploy:method`:
 
 | | `package` (default) | `source` |
 |---|---|---|
-| Installs | the released wheel from the Forgejo PyPI registry | a Git checkout plus `requirements/` |
+| Installs | a released wheel from a PyPI-compatible registry | a Git checkout plus `requirements/` |
 | Deploys | exactly the artifact CI built and released | whatever the pinned revision contains |
-| Needs on the minion | a registry token | `git`, an SSH deploy key, and the forge host key |
+| Needs on the minion | a registry you publish to | `git` (plus a deploy key and host key only for a private repository) |
 | Supports the legacy upstream revision | no | yes |
 
 Prefer `package`. The wheel is the artifact the release pipeline tested, it
@@ -134,7 +139,7 @@ same Salt-side result; they differ only in where Alcali itself runs.
 
 | Method | What is deployed here | Use when |
 |---|---|---|
-| `package` | Wheel from the Forgejo PyPI registry into a venv, under systemd | Default. The deployed artifact is exactly what CI released. |
+| `package` | Wheel from a PyPI-compatible registry into a venv, under systemd | Default. The deployed artifact is exactly what CI released. Needs a registry you publish to. |
 | `source` | Git checkout plus requirements, under systemd | The pinned revision predates the wheel, or you are testing a branch. |
 | `docker` | Published container image under Compose and systemd | You would rather not install Python and its build dependencies on the host. |
 | `external` | Nothing | Alcali runs on another host, in Kubernetes, or is otherwise not this formula's to manage. |
@@ -155,7 +160,7 @@ alcali:
   deploy:
     method: docker
   docker:
-    image: forge.thatserver.ca/salt/alcali:3008.2.0
+    image: registry.example.com/alcali:3008.2.0
     registry_username: alcali-deploy
     registry_password: REPLACE_WITH_A_READ_ONLY_REGISTRY_TOKEN
     publish_address: 127.0.0.1
@@ -288,9 +293,8 @@ into Salt's onedir environment.
 The wheel lives in a private registry, so the minion authenticates before pip
 can reach it:
 
-1. Create a Forgejo access token with the `read:package` scope. A token that
-   can only read packages is enough; do not reuse the release pipeline's
-   `write:package` token.
+1. Create a read-only access token for your registry. A token that can only
+   read packages is enough; do not reuse a publish token.
 2. Put it in pillar:
 
    ```yaml
@@ -298,7 +302,7 @@ can reach it:
      deploy:
        method: package
        package:
-         registry_url: https://forge.thatserver.ca/api/packages/salt/pypi
+         registry_url: https://forge.example.com/api/packages/alcali/pypi
          username: alcali-deploy
          password: a-read-only-registry-token
    ```
@@ -345,10 +349,12 @@ alcali:
 
 ## Source access (method: source)
 
-The Forgejo repository is private, so the minion authenticates before it can
-clone:
+The default repository is public and is cloned over HTTPS, so no credentials
+are needed and `deploy:identity` and `deploy:known_host:name` stay `null`.
 
-1. Create a **read-only deploy key** for `salt/alcali-modernized` in Forgejo.
+For a private mirror over SSH, the minion authenticates before it can clone:
+
+1. Create a **read-only deploy key** for the repository.
 2. Place the private key where the minion can read it, either in the
    fileserver next to this formula (`files/deploy_key`, kept out of any public
    repository) or already on the minion, and point at it:
@@ -359,17 +365,14 @@ clone:
        identity: salt://alcali/files/deploy_key
    ```
 
-3. Leave `deploy:known_host` populated. It writes the forge's host key into
-   the deploy user's `known_hosts` before the first clone, so an unexpected
-   key aborts the run instead of being trusted silently. Confirm the pinned
-   fingerprint against the forge's own SSH settings page:
+3. Populate `deploy:known_host`. It writes the host key into the deploy
+   user's `known_hosts` before the first clone, so an unexpected key aborts
+   the run instead of being trusted silently. Confirm the pinned fingerprint
+   against the forge's own SSH settings page:
 
    ```bash
-   ssh-keyscan -p 8222 -t ssh-ed25519 forge.thatserver.ca | ssh-keygen -lf -
+   ssh-keyscan -p 8222 -t ssh-ed25519 forge.example.com | ssh-keygen -lf -
    ```
-
-For a public HTTPS repository, set `deploy:identity` and `deploy:known_host`
-to `null`.
 
 When a host was previously deployed from the GitHub source, the change of
 `deploy:repository` re-points the existing checkout. If Git refuses the
