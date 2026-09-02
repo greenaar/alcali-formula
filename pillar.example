@@ -3,7 +3,7 @@
 ---
 alcali:
   # Formula target for the modernized application fork.
-  version: 3008.2.0
+  version: 3008.11.1
   supported_osfingers:
     - Debian-13
     - Ubuntu-24.04
@@ -36,7 +36,7 @@ alcali:
     # HTTPS, which needs neither identity nor known_host; this example shows
     # the private-over-SSH case instead, where both are required.
     repository: ssh://git@forge.example.com:8222/salt/alcali-modernized.git
-    revision: 14fe53a19aacff688fdc98cffc43b665bb813baf    # tag v3008.2.0
+    revision: ed1df50629d6c30aae76fc2e26e80a858682b664    # tag v3008.11.1
     force_reset: false
     # A read-only deploy key. Ship it through the fileserver (0400,
     # root-owned) or point at a key already present on the minion.
@@ -106,7 +106,7 @@ alcali:
   # Used by deploy:method: docker only.
   docker:
     # Pin a version. Defaults to registry/alcali:<alcali:version> when null.
-    image: registry.example.com/alcali:3008.2.0
+    image: registry.example.com/alcali:3008.11.1
     registry: registry.example.com
     # Written to /root/.docker/config.json, never passed to `docker login`.
     registry_username: alcali-deploy

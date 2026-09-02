@@ -2,7 +2,7 @@
 # vim: ft=yaml
 ---
 alcali:
-  version: 3008.2.0
+  version: 3008.11.1
   supported_osfingers:
     - Debian-13
     - Ubuntu-24.04
@@ -45,9 +45,9 @@ alcali:
 
     # Used by method: source only.
     repository: https://github.com/greenaar/alcali-modernized.git
-    # Modernized application, release v3008.2.0.
+    # Modernized application, release v3008.11.1.
     # Upstream v3006.3.0 remains available as the legacy revision below.
-    revision: 14fe53a19aacff688fdc98cffc43b665bb813baf
+    revision: ed1df50629d6c30aae76fc2e26e80a858682b664
     force_reset: false
     # Private key used to clone a private repository over SSH. Accepts a
     # salt:// path or an absolute path on the minion; null for an anonymous

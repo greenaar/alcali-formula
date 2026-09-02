@@ -7,7 +7,7 @@ account.
 
 ## Important project status
 
-The formula deploys the modernized `3008.2.0` application: Python 3.12,
+The formula deploys the modernized `3008.11.1` application: Python 3.12,
 Django 5.2, Vue 3 and Vuetify 3. It is pinned to the
 [alcali-modernized](https://github.com/greenaar/alcali-modernized) fork:
 
@@ -15,7 +15,7 @@ Django 5.2, Vue 3 and Vuetify 3. It is pinned to the
 alcali:
   deploy:
     repository: https://github.com/greenaar/alcali-modernized.git
-    revision: 14fe53a19aacff688fdc98cffc43b665bb813baf    # tag v3008.2.0
+    revision: ed1df50629d6c30aae76fc2e26e80a858682b664    # tag v3008.11.1
 ```
 
 No wheel or container image is published publicly for that fork, so
@@ -160,7 +160,7 @@ alcali:
   deploy:
     method: docker
   docker:
-    image: registry.example.com/alcali:3008.2.0
+    image: registry.example.com/alcali:3008.11.1
     registry_username: alcali-deploy
     registry_password: REPLACE_WITH_A_READ_ONLY_REGISTRY_TOKEN
     publish_address: 127.0.0.1
