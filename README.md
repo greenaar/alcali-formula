@@ -357,6 +357,70 @@ alcali:
 
 ## Source access (method: source)
 
+> **A source install of the modernized fork has no frontend until you build
+> one.** `dist/` is build output and is gitignored, so the checkout contains
+> the Django application and no UI whatsoever. Nothing fails: pip installs,
+> migrations apply, `collectstatic` succeeds (it creates `dist/static` for the
+> admin and DRF assets), the service starts, and the API answers. Every UI
+> route then returns a 500, because Django's template `DIRS` is
+> `<code_directory>/dist` and there is no `index.html` in it.
+>
+> This is why `method: package` is the default: the release workflow runs
+> `pnpm build` before packaging, so the wheel and the container image are the
+> only artifacts that carry a working interface. Use `source` only for the
+> legacy upstream revision, which committed its bundle, or when you are
+> prepared to do the following on every minion.
+
+### Building the frontend for a source install
+
+Do this after the first highstate has created the checkout, and again every
+time `deploy:revision` moves - the bundle is built from the sources at that
+revision and nothing rebuilds it for you.
+
+1. Install Node 22 and pnpm on the minion. The major version must match what
+   the project builds with; a newer one is rejected by `engines` in
+   `package.json`:
+
+   ```bash
+   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+   sudo apt-get install -y nodejs
+   sudo corepack enable
+   sudo corepack prepare pnpm@11.18.0 --activate
+   ```
+
+2. Build the bundle as the deploy user, in the checkout:
+
+   ```bash
+   cd /opt/alcali/code
+   sudo -u alcali pnpm install --frozen-lockfile --ignore-scripts
+   sudo -u alcali pnpm build
+   test -f /opt/alcali/code/dist/index.html
+   ```
+
+3. Re-run `collectstatic`, then restart. **This order matters**: `pnpm build`
+   empties `dist/` before writing to it, so a bundle built after a highstate
+   discards the `dist/static` that `collectstatic` produced, and the admin and
+   DRF assets 404 until it runs again.
+
+   ```bash
+   cd /opt/alcali/code && sudo -u alcali ENV_PATH=/opt/alcali \
+       /opt/alcali/venv/bin/python manage.py collectstatic --noinput
+   ```
+   ```bash
+   sudo systemctl restart alcali
+   ```
+
+A hand-built `dist/` survives later highstates: `git.latest` runs with
+`force_clone: false` and no `force_clean`, so it does not remove ignored
+files. It does *not* survive a change of revision in any useful sense - the
+files stay, but they are the previous revision's interface in front of the
+new application. Rebuild whenever `deploy:revision` changes.
+
+If none of that appeals, `method: package` needs no toolchain on the minion
+at all, and its wheel is a public release asset.
+
+### Repository authentication
+
 The default repository is public and is cloned over HTTPS, so no credentials
 are needed and `deploy:identity` and `deploy:known_host:name` stay `null`.
 
