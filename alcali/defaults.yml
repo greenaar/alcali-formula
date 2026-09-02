@@ -29,7 +29,7 @@ alcali:
       # package. The wheel is fetched by its exact file URL, so no index is
       # consulted for Alcali itself and a package of the same name published
       # elsewhere cannot shadow it. Dependencies still resolve normally.
-      registry_url: https://git.example.com/api/packages/salt/pypi
+      registry_url: https://forge.thatserver.ca/api/packages/salt/pypi
       # Full wheel URL. Derived from registry_url and the version when null.
       url: null
       # Credentials for that registry. They are written to the deploy user's
@@ -40,7 +40,7 @@ alcali:
       version: null
 
     # Used by method: source only.
-    repository: ssh://git@git.example.com:8222/salt/alcali-modernized.git
+    repository: ssh://git@forge.thatserver.ca:8222/salt/alcali-modernized.git
     # Modernized application, release v3008.2.0 on the Forgejo repository.
     # Upstream v3006.3.0 remains available as the legacy revision below.
     revision: 14fe53a19aacff688fdc98cffc43b665bb813baf
@@ -52,7 +52,7 @@ alcali:
     # Host key pinned for the deploy user before the first clone. Set name to
     # null when the repository is cloned over HTTPS.
     known_host:
-      name: git.example.com
+      name: forge.thatserver.ca
       port: 8222
       enc: ssh-ed25519
       # Verified against the scanned key when set; null accepts what the
@@ -100,12 +100,37 @@ alcali:
     ca_bundle: null
     timeout: 30
 
+  # Outbound notification delivery. The rules themselves - what fires, and
+  # who hears about it - are configured in Alcali's own UI; this is only the
+  # mail transport and how often the rules are evaluated.
+  #
+  # With email:host unset Django stays on its console backend, so an
+  # installation that has not asked for mail prints instead of sending. A
+  # rule with only a webhook needs none of this.
+  notifications:
+    # Rules are evaluated only when the timer runs; nothing is sent without
+    # it. Not enabled by default: a fleet-wide sweep on a schedule is
+    # something to opt into.
+    enabled: false
+    # systemd OnCalendar expression. Every fifteen minutes by default, which
+    # is frequent enough to notice drift and far below the rate at which a
+    # transition-only alert becomes noise.
+    schedule: '*:0/15'
+    email:
+      host: null
+      port: 25
+      user: null
+      password: null
+      use_tls: false
+      use_ssl: false
+      from_address: alcali@localhost
+
   # Used by deploy:method: docker only.
   docker:
     # Defaults to registry ~ '/alcali:' ~ version when null. Pin a version;
     # a floating tag makes it impossible to say what is deployed.
     image: null
-    registry: git.example.com/salt
+    registry: forge.thatserver.ca/salt
     # Credentials for a private registry. Written to the root Docker config,
     # never passed on a command line.
     registry_username: null

@@ -7,11 +7,36 @@ account.
 
 ## Important project status
 
-The formula targets the modernized `3006.4.0.dev0` application: Python 3.12,
-Django 5.2, Vue 3 and Vuetify 3. Until that commit is published, the default
-repository and revision deliberately remain on the original `v3006.3.0`
-source. Replace both values together when the fork has a permanent home; the
-current modernized candidate is `8f07bb66dff6428f833c838ab6f053e71ea16429`.
+The formula deploys the modernized `3008.2.0` application: Python 3.12,
+Django 5.2, Vue 3 and Vuetify 3. It is pinned to the fork hosted on the
+internal Forgejo instance:
+
+```yaml
+alcali:
+  deploy:
+    repository: ssh://git@forge.thatserver.ca:8222/salt/alcali-modernized.git
+    revision: 14fe53a19aacff688fdc98cffc43b665bb813baf    # tag v3008.2.0
+```
+
+There are two installation methods, selected with `alcali:deploy:method`:
+
+| | `package` (default) | `source` |
+|---|---|---|
+| Installs | the released wheel from the Forgejo PyPI registry | a Git checkout plus `requirements/` |
+| Deploys | exactly the artifact CI built and released | whatever the pinned revision contains |
+| Needs on the minion | a registry token | `git`, an SSH deploy key, and the forge host key |
+| Supports the legacy upstream revision | no | yes |
+
+Prefer `package`. The wheel is the artifact the release pipeline tested, it
+carries the prebuilt frontend, and no source tree or build patch is left on the
+minion. Use `source` to run an unreleased commit, or to fall back to the
+original upstream release.
+
+Move `deploy:revision` forward deliberately, one reviewed commit at a time. The
+original upstream release remains available as a rollback target by setting
+`deploy:repository` back to `https://github.com/latenighttales/alcali.git` and
+`deploy:revision` to the value in `alcali:legacy:revision`; the formula then
+re-enables the compatibility patch and Django pin that release needs.
 
 Keep Alcali on a trusted management network, bind Gunicorn to loopback, and
 publish it only through an authenticated TLS reverse proxy.
@@ -87,15 +112,131 @@ Salt PostgreSQL returner schema.
 |---|---|
 | `alcali` | Complete application and optional Salt-master integration |
 | `alcali.user` | System account and `/opt/alcali` directory |
-| `alcali.install` | Packages, pinned source, venv, dependencies, and legacy-only TLS patch |
+| `alcali.install` | Packages, registry or Git source, venv, dependencies, and legacy-only TLS patch |
 | `alcali.config` | Validates secrets and writes `/opt/alcali/.env` |
 | `alcali.migrate` | Applies pending migrations and collects static assets |
 | `alcali.service` | Hardened systemd unit and running Gunicorn service |
+| `alcali.docker` | Compose deployment of the published container image (`method: docker`) |
 | `alcali.master` | Optional Salt returner, salt-api, and eAuth configuration |
 | `alcali.clean` | Removes Alcali while preserving packages and databases |
 
+`init.sls` includes only the states the selected `deploy:method` needs.
+`alcali.master` is always included, because the master-side wiring is required
+however Alcali itself is deployed.
+
 Defaults live in `defaults.yml`; pillar is merged through `map.jinja`. See
-`pillar.example` for every supported setting.
+`pillar.example.sls` for every supported setting.
+
+## Deployment methods
+
+`alcali:deploy:method` selects what the formula deploys. All four produce the
+same Salt-side result; they differ only in where Alcali itself runs.
+
+| Method | What is deployed here | Use when |
+|---|---|---|
+| `package` | Wheel from the Forgejo PyPI registry into a venv, under systemd | Default. The deployed artifact is exactly what CI released. |
+| `source` | Git checkout plus requirements, under systemd | The pinned revision predates the wheel, or you are testing a branch. |
+| `docker` | Published container image under Compose and systemd | You would rather not install Python and its build dependencies on the host. |
+| `external` | Nothing | Alcali runs on another host, in Kubernetes, or is otherwise not this formula's to manage. |
+
+`docker` and `external` still need `alcali:database` and `alcali:salt_api` to
+be correct — the master's returner and salt-api configuration is rendered from
+them, and that is the whole of what `external` does.
+
+### method: docker
+
+Runs the published image on this host, driven by a systemd unit wrapping
+`docker compose up -d`. `docker.io` and `docker-compose-v2` come from the
+distribution, so no third-party repository is added. There is no salt-master
+and no salt-minion in the Compose project: it is the application only.
+
+```yaml
+alcali:
+  deploy:
+    method: docker
+  docker:
+    image: forge.thatserver.ca/salt/alcali:3008.2.0
+    registry_username: alcali-deploy
+    registry_password: REPLACE_WITH_A_READ_ONLY_REGISTRY_TOKEN
+    publish_address: 127.0.0.1
+    publish_port: 8000
+  database:
+    host: db.example.com          # reached from inside the container
+  salt_api:
+    url: https://master.example.com:8080
+```
+
+Three things behave differently from the systemd methods, and each one is a
+failure that is otherwise hard to diagnose:
+
+- **`alcali:database:host` is resolved inside the container.** A loopback
+  address there is the container, not the host, so the formula rewrites a
+  loopback `database:host` to `host.docker.internal` and adds the matching
+  `host-gateway` mapping. Set it to a real hostname when the database is
+  elsewhere.
+- **`alcali:salt_api:url` is *not* rewritten**, and the formula refuses to
+  apply if it names a loopback address while `verify_tls` is on. Substituting
+  a gateway alias would break certificate verification, and the usual next
+  step is to turn verification off on the connection carrying users'
+  credentials. Use the hostname the salt-api certificate is issued for.
+- **The `^url` callback is derived from `docker:publish_address` and
+  `docker:publish_port`**, not from `gunicorn:`. If the master is on a
+  different host, set `alcali:salt_master:rest_auth:verify_url` explicitly to
+  an address the master can reach.
+
+Registry credentials are written to `/root/.docker/config.json` rather than
+passed to `docker login`, which would put the token into the state output and
+from there into the master job cache — the same database Alcali reads.
+
+The container image is pinned; the Compose file is written in terms the image
+has always provided (`manage.py` and a shell) rather than helper scripts, so
+it keeps working against whichever tag you pin.
+
+#### Bundled database
+
+`alcali:docker:bundled_database: true` adds MariaDB to the Compose project and
+loads Salt's returner schema into it on first start. Off by default: a master
+that is already returning to a database should keep doing so, and Alcali
+should read that one.
+
+When it is on, `alcali:database:host` and `:port` are where the container
+publishes the database — which must be an address on this host — and the same
+values are rendered into the master's returner configuration, so the two
+cannot disagree. `alcali:docker:database_root_password` is then required.
+
+The volume holding it (`alcali_db-data`) is the master's job cache. Neither
+`alcali.clean` nor the unit's `ExecStop` removes it; delete it deliberately
+with `docker volume rm` once you are certain.
+
+### method: external
+
+Deploys nothing. Applies only `alcali.master`: the returner configuration, the
+database connector in the master's Python, salt-api, and the `external_auth`
+block. Use it when Alcali runs somewhere this formula does not reach.
+
+```yaml
+alcali:
+  deploy:
+    method: external
+  database:
+    host: db.example.com
+    user: alcali
+    password: REPLACE_WITH_A_LONG_RANDOM_PASSWORD
+  salt_master:
+    manage: true
+    rest_auth:
+      # Required: nothing local to derive it from. The *master* resolves this.
+      verify_url: https://alcali.example.com/api/token/verify/
+```
+
+`verify_url` has no default here and the formula refuses to render the master
+configuration without it. An `external_auth` block with the wrong callback
+rejects every login, and it does so inside the master, so nothing appears in
+Alcali's log.
+
+Because Alcali is not deployed here, `alcali:django:secret_key` is unused and
+`alcali:database:password` is only used to render the master's returner
+configuration — it must match what the external Alcali uses.
 
 ## Database preparation
 
@@ -142,9 +283,102 @@ the role owns or can alter the schema so Django migrations can create Alcali's
 tables. With connector management enabled, the formula installs `psycopg2`
 into Salt's onedir environment.
 
+## Registry access (method: package)
+
+The wheel lives in a private registry, so the minion authenticates before pip
+can reach it:
+
+1. Create a Forgejo access token with the `read:package` scope. A token that
+   can only read packages is enough; do not reuse the release pipeline's
+   `write:package` token.
+2. Put it in pillar:
+
+   ```yaml
+   alcali:
+     deploy:
+       method: package
+       package:
+         registry_url: https://forge.thatserver.ca/api/packages/salt/pypi
+         username: alcali-deploy
+         password: a-read-only-registry-token
+   ```
+
+The formula writes those credentials to `/opt/alcali/.netrc` (mode `0600`,
+owned by the deploy user), where pip finds them. They never appear in a command
+line, in `ps` output, or in state return data. Set both values or neither; a
+registry that needs no authentication simply gets no netrc.
+
+Alcali is installed from its exact file URL, which the formula derives as:
+
+```
+{registry_url}/files/alcali/{version}/alcali-{version}-py3-none-any.whl
+```
+
+No package index is consulted for Alcali itself, so nothing published under
+that name on another index can be selected in its place. Its dependencies are
+ordinary PyPI packages and resolve normally. Set
+`alcali:deploy:package:url` to override the whole URL if the registry layout
+ever differs.
+
+The installed version comes from `alcali:version`, or from
+`alcali:deploy:package:version` when the two need to differ. Upgrading is a
+pillar change: raise the version and re-apply.
+
+Because a wheel cannot carry the repository's `VERSION` file, the formula
+writes it next to the installed package so the interface and
+`manage.py current_version` report the deployed release rather than
+`unknown`.
+
+### Dropping the build toolchain
+
+`gcc`, `python3-dev`, `pkg-config` and the database client headers are
+installed only because `mysqlclient`, `psycopg2` and `python-ldap` compile from
+source. On PostgreSQL without LDAP, selecting a prebuilt connector removes all
+of them:
+
+```yaml
+alcali:
+  database:
+    backend: postgresql
+    connector: psycopg2-binary
+```
+
+## Source access (method: source)
+
+The Forgejo repository is private, so the minion authenticates before it can
+clone:
+
+1. Create a **read-only deploy key** for `salt/alcali-modernized` in Forgejo.
+2. Place the private key where the minion can read it, either in the
+   fileserver next to this formula (`files/deploy_key`, kept out of any public
+   repository) or already on the minion, and point at it:
+
+   ```yaml
+   alcali:
+     deploy:
+       identity: salt://alcali/files/deploy_key
+   ```
+
+3. Leave `deploy:known_host` populated. It writes the forge's host key into
+   the deploy user's `known_hosts` before the first clone, so an unexpected
+   key aborts the run instead of being trusted silently. Confirm the pinned
+   fingerprint against the forge's own SSH settings page:
+
+   ```bash
+   ssh-keyscan -p 8222 -t ssh-ed25519 forge.thatserver.ca | ssh-keygen -lf -
+   ```
+
+For a public HTTPS repository, set `deploy:identity` and `deploy:known_host`
+to `null`.
+
+When a host was previously deployed from the GitHub source, the change of
+`deploy:repository` re-points the existing checkout. If Git refuses the
+transition, remove `/opt/alcali/code` once and re-apply; the virtualenv,
+`.env` and database are untouched.
+
 ## Pillar setup
 
-Copy `pillar.example` into your pillar tree and at minimum change:
+Copy `pillar.example.sls` into your pillar tree and at minimum change:
 
 ```yaml
 alcali:
@@ -228,6 +462,16 @@ restart `salt-master`, and restart/start `salt-api`.
 
 ### Let this formula manage the integration
 
+`alcali:salt_master:config_file` defaults to `/etc/salt/master.d/alcali.conf`.
+If the `salt` formula also manages this master, it deploys `master.d` with
+`clean: true` and deletes files it does not own. Its `config_d_preserve_from`
+default resolves `alcali:salt_master:config_file` and preserves whatever this
+formula is configured to write, so nothing needs to be repeated under `salt:`.
+On an older `salt` formula without that mechanism, either rename this file to
+`_alcali.conf` or add it to `salt:master_config_d_preserve` — otherwise it is
+removed on the next highstate, and the symptom is that logins and job history
+stop working with nothing in Alcali's log.
+
 After reviewing the generated settings and creating the API certificate, set:
 
 ```yaml
@@ -276,7 +520,7 @@ Verify Alcali's built-in environment/database check:
 
 ```bash
 sudo -u alcali env ENV_PATH=/opt/alcali \
-  /opt/alcali/venv/bin/python /opt/alcali/code/manage.py alcali_check
+  /opt/alcali/venv/bin/python /opt/alcali/code/manage.py diagnose
 ```
 
 Verify salt-api independently before troubleshooting Alcali:
@@ -336,7 +580,7 @@ upstream LDAP Python requirements.
 
 For Google OAuth, enable `features:social`, set `django:auth_backend` to
 `social`, and provide the `SOCIAL_AUTH_*` variables shown in
-`pillar.example`.
+`pillar.example.sls`.
 
 ## TLS verification
 
@@ -397,6 +641,8 @@ and `salt_events`.
 
 ### Git reports a modified source tree
 
+This applies to `method: source` only; `method: package` keeps no checkout.
+
 Only the legacy revision receives the TLS compatibility patch, so a modified
 source tree is expected while that revision remains selected. The patch is
 automatically omitted once `deploy:revision` points at the modernized commit.
@@ -421,29 +667,3 @@ source, virtual environment, and `.env`. It deliberately preserves:
 Set `alcali:salt_master:remove_on_clean: true` only if the Salt-master config
 should also be removed. Restart the Salt master and salt-api after removing
 that file.
-
-## Relationship to upstream
-
-**This is a heavily modified fork of
-[`saltstack-formulas/alcali-formula`](https://github.com/saltstack-formulas/alcali-formula). Do not treat it as a drop-in
-replacement for it.**
-
-States have been renamed, split, merged, and removed; pillar keys have moved;
-defaults differ; and behaviour has changed in ways that are not backward
-compatible. Pointing an existing deployment at this formula without reading
-`pillar.example` and the state list above will not do what you expect.
-
-It is also not a newer version of upstream — it diverged and was maintained
-separately, so upstream may well have fixes and platform support that this
-does not. If you want the maintained original, use
-[`saltstack-formulas/alcali-formula`](https://github.com/saltstack-formulas/alcali-formula).
-
-### Credit
-
-The foundation of this formula, and much of what still works well in it, is
-the work of the [saltstack-formulas](https://github.com/saltstack-formulas) authors and contributors. Any
-bugs introduced in the divergence are this fork's own.
-
-## License
-
-Dedicated to the public domain under [CC0 1.0 Universal](LICENSE).

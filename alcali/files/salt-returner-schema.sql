@@ -29,7 +29,15 @@ CREATE TABLE IF NOT EXISTS `salt_returns` (
   `alter_time` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   KEY `id` (`id`),
   KEY `jid` (`jid`),
-  KEY `fun` (`fun`)
+  KEY `fun` (`fun`),
+  -- Salt's own DDL stops at the three keys above. Alcali orders by alter_time
+  -- on nearly every query against this table - the jobs list, the states page,
+  -- the retention counts - and without these that degrades into a full scan
+  -- plus a filesort over two mediumtext columns once the history is large.
+  -- The composite serves "this minion's most recent returns", which is what
+  -- the minion detail and conformity pages ask for.
+  KEY `alter_time` (`alter_time`),
+  KEY `id_alter_time` (`id`, `alter_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `salt_events` (

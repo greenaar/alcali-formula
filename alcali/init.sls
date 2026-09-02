@@ -10,6 +10,7 @@ include:
   - alcali.config
   - alcali.migrate
   - alcali.service
+  - alcali.notify
 {%- elif alcali.method == 'docker' %}
   - alcali.docker
 {%- endif %}

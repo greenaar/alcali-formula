@@ -1,0 +1,15 @@
+{#- Context:
+      schedule   systemd OnCalendar expression
+#}
+[Unit]
+Description=Evaluate Alcali notification rules on a schedule
+
+[Timer]
+OnCalendar={{ schedule }}
+{#- The rules are transition-based, so a run missed while the host was down
+    is not lost: the next one still sees the minion in its new state. #}
+Persistent=true
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

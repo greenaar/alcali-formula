@@ -3,17 +3,50 @@
 ---
 alcali:
   # Formula target for the modernized application fork.
-  version: 3006.4.0.dev0
+  version: 3008.2.0
   supported_osfingers:
     - Debian-13
     - Ubuntu-24.04
 
   deploy:
-    repository: https://github.com/latenighttales/alcali.git
-    # Legacy source remains here until the modernized commit has a remote home.
-    # Modernized candidate: 8f07bb66dff6428f833c838ab6f053e71ea16429
-    revision: 92dfc9af57e2fdff0d7f373fbc48be90b08167ec
+    # package:  install the published wheel from the Forgejo PyPI registry.
+    #           The deployed artifact is then exactly the one CI built and
+    #           released, and no source checkout is kept on the minion.
+    # source:   clone the repository and install its requirements. Required
+    #           for the legacy upstream revision, which predates the wheel.
+    # docker:   run the published container image here under Compose. See the
+    #           alcali:docker block below.
+    # external: Alcali runs somewhere this formula does not manage. Nothing is
+    #           deployed; only the alcali:salt_master wiring is applied, and
+    #           alcali:salt_master:rest_auth:verify_url becomes required.
+    method: package
+
+    package:
+      # The wheel is fetched by exact file URL from this registry, so no
+      # index is consulted for Alcali itself.
+      registry_url: https://forge.thatserver.ca/api/packages/salt/pypi
+      # Credentials for that registry. They are written to the deploy user's
+      # netrc, never passed on a command line. A read-only token is enough.
+      username: alcali-deploy
+      password: REPLACE_WITH_A_READ_ONLY_REGISTRY_TOKEN
+      # Defaults to alcali:version when null.
+      version: null
+
+    # Used by method: source only.
+    # Modernized application on the internal Forgejo instance.
+    repository: ssh://git@forge.thatserver.ca:8222/salt/alcali-modernized.git
+    revision: 14fe53a19aacff688fdc98cffc43b665bb813baf    # tag v3008.2.0
     force_reset: false
+    # The repository is private, so the minion needs a read-only Forgejo
+    # deploy key. Ship it through the fileserver (0400, root-owned) or point
+    # at a key already present on the minion.
+    identity: salt://alcali/files/deploy_key
+    # Pinned so the first clone cannot be answered by an unknown host key.
+    known_host:
+      name: forge.thatserver.ca
+      port: 8222
+      enc: ssh-ed25519
+      fingerprint: SHA256:eE8cyFih/+oZvnUaQF7WAsbEpDt0p0/xncrEPUnbKyU
     directory: /opt/alcali
     code_directory: /opt/alcali/code
     virtualenv: /opt/alcali/venv
@@ -26,6 +59,7 @@ alcali:
   # Create it and load Salt's official returner schema before applying Alcali.
   database:
     backend: mysql             # mysql or postgresql
+    # connector: psycopg2-binary   # avoids building the connector from source
     name: salt
     user: alcali
     password: REPLACE_WITH_A_LONG_RANDOM_PASSWORD
@@ -43,13 +77,65 @@ alcali:
 
   salt_api:
     # Alcali's backend connects to this address. Keeping it on loopback is
-    # preferred when Alcali and the Salt master share a host.
+    # preferred when Alcali and the Salt master share a host - but not for
+    # deploy:method: docker, where loopback is the container rather than the
+    # host. Use the hostname the salt-api certificate is issued for there.
     url: https://127.0.0.1:8080
     auth: rest
     master_minion_id: salt-master.example.com
     verify_tls: true
     # ca_bundle: /etc/ssl/certs/internal-ca.pem
     timeout: 30
+
+  # Notification delivery. What fires and who hears about it is configured in
+  # Alcali's own UI; this is the mail transport and the evaluation schedule.
+  # A rule that only posts to a webhook needs none of the email settings.
+  notifications:
+    # Nothing is sent unless this timer runs.
+    enabled: true
+    # systemd OnCalendar. Alerts fire on a transition rather than a state, so
+    # a frequent sweep does not mean frequent mail.
+    schedule: '*:0/15'
+    email:
+      host: letter.example.com
+      port: 25
+      use_tls: false
+      # user / password only if the relay requires authentication.
+      from_address: alcali@example.com
+
+  # Used by deploy:method: docker only.
+  docker:
+    # Pin a version. Defaults to registry/alcali:<alcali:version> when null.
+    image: forge.thatserver.ca/salt/alcali:3008.2.0
+    registry: forge.thatserver.ca/salt
+    # Written to /root/.docker/config.json, never passed to `docker login`.
+    registry_username: alcali-deploy
+    registry_password: REPLACE_WITH_A_READ_ONLY_REGISTRY_TOKEN
+    pull: true
+    install_packages: true
+    packages:
+      - docker.io
+      - docker-compose-v2
+    directory: /opt/alcali
+    compose_file: /opt/alcali/docker-compose.yml
+    project_name: alcali
+    # Publish behind a TLS reverse proxy, as with the systemd deployment.
+    # This address also becomes the default salt-api ^url callback.
+    publish_address: 127.0.0.1
+    publish_port: 8000
+    # Run MariaDB in the same Compose project. Off unless the master has no
+    # returner database yet. When on, alcali:database:host must be an address
+    # on this host - it is where the container publishes it and where the
+    # master is told to connect.
+    bundled_database: false
+    database_image: mariadb:11.4
+    database_root_password: null
+    # CA the container must trust to reach salt-api. salt:// or an absolute
+    # path on the minion; mounted read-only at ca_bundle_path.
+    ca_bundle_source: null
+    ca_bundle_path: /etc/alcali/tls/salt-ca.pem
+    service: alcali
+    start_timeout: 300
 
   features:
     ldap: false
@@ -119,8 +205,13 @@ alcali:
       - wheel_async
 
     rest_auth:
-      # The Salt master calls this endpoint to validate Alcali JWT tokens.
-      verify_url: http://127.0.0.1:5000/api/token/verify/
+      # The Salt master calls this endpoint to validate Alcali JWT tokens, so
+      # the address must resolve and be routable *from the master*.
+      #
+      # Derived from the deployment when null: the gunicorn bind for
+      # package/source, the published Compose address for docker. Required
+      # for deploy:method: external, which has nothing to derive it from.
+      verify_url: null
       users:
         admin:
           - '.*'
