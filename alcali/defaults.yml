@@ -10,8 +10,11 @@ alcali:
     # package:  install a published wheel from a Python package registry.
     #           The deployed artifact is then exactly the one CI built and
     #           released, and no source checkout is kept on the minion.
-    # source:   clone the repository and install its requirements. Required
-    #           for the legacy upstream revision, which predates the wheel.
+    # source:   clone the repository and install its requirements. Only for
+    #           the legacy upstream revision, which committed its frontend
+    #           bundle. The modernized fork does not: dist/ is build output
+    #           and untracked, so a checkout of it installs cleanly and then
+    #           serves every UI route as a 500.
     # docker:   run the published container image on this host under Compose.
     #           Nothing Python is installed on the minion.
     # external: Alcali runs somewhere this formula does not manage. Nothing is
@@ -25,17 +28,22 @@ alcali:
     method: package
 
     package:
-      # Base URL of the PyPI-compatible registry holding the wheel, e.g.
-      # https://forge.example.com/api/packages/<owner>/pypi. No wheel is
-      # published for this project publicly, so this has no default: set it to
-      # your own registry, or use method: source below.
+      # Base URL of a PyPI-compatible registry holding the wheel, e.g.
+      # https://forge.example.com/api/packages/<owner>/pypi. Only consulted
+      # when url below is null.
       #
       # The wheel is fetched by its exact file URL, so no index is consulted
       # for Alcali itself and a package of the same name published elsewhere
       # cannot shadow it. Dependencies still resolve normally.
       registry_url: null
-      # Full wheel URL. Derived from registry_url and the version when null.
-      url: null
+      # Full wheel URL. {version} and {wheel} are substituted, so this default
+      # follows alcali:version rather than pinning one release. Defaults to the
+      # asset attached to the matching GitHub release, which is public and
+      # needs no credentials.
+      #
+      # Set it to null and populate registry_url instead to install from your
+      # own registry.
+      url: https://github.com/greenaar/alcali-modernized/releases/download/v{version}/{wheel}
       # Credentials for that registry. They are written to the deploy user's
       # netrc, never passed on a command line. A read-only token is enough.
       username: null

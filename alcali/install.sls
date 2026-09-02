@@ -39,7 +39,12 @@
     means pip never queries an index for Alcali, so nothing published under
     the same name anywhere else can be selected instead. #}
 {%- set wheel_name = 'alcali-' ~ package_version ~ '-py3-none-any.whl' %}
-{%- set wheel_url = package_cfg.get('url') or
+{#- `url` may carry {version} and {wheel} placeholders so a configured default
+    follows alcali:version rather than pinning one release. A literal URL with
+    neither placeholder is passed through unchanged. #}
+{%- set url_template = package_cfg.get('url') %}
+{%- set wheel_url = url_template|replace('{version}', package_version)|replace('{wheel}', wheel_name)
+      if url_template else
       ((package_cfg.get('registry_url') or '').rstrip('/') ~ '/files/alcali/' ~ package_version ~ '/' ~ wheel_name) %}
 {%- set requirement = 'alcali[' ~ extras|join(',') ~ '] @ ' ~ wheel_url if extras else 'alcali @ ' ~ wheel_url %}
 {%- set registry_user = package_cfg.get('username') %}

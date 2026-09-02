@@ -18,18 +18,25 @@ alcali:
     revision: ed1df50629d6c30aae76fc2e26e80a858682b664    # tag v3008.11.1
 ```
 
-No wheel or container image is published publicly for that fork, so
-`method: package` and `method: docker` need a registry of your own. Cloning
-the public repository with `method: source` is the path that needs no
-credentials at all.
+The default `method: package` needs no credentials: it fetches the wheel
+attached to the matching GitHub release.
+
+> **`method: source` does not work for this fork.** The frontend bundle lives
+> in `dist/`, which is build output and is not tracked, so a git checkout has
+> no UI. The release workflow runs `pnpm build` before packaging, which is why
+> only the wheel and the container image carry a usable Alcali. A source
+> install starts, answers the API, and serves every UI route as a 500. It
+> remains supported only for the legacy upstream revision, which committed its
+> bundle.
 
 There are two installation methods, selected with `alcali:deploy:method`:
 
 | | `package` (default) | `source` |
 |---|---|---|
-| Installs | a released wheel from a PyPI-compatible registry | a Git checkout plus `requirements/` |
+| Installs | the wheel attached to the GitHub release | a Git checkout plus `requirements/` |
 | Deploys | exactly the artifact CI built and released | whatever the pinned revision contains |
-| Needs on the minion | a registry you publish to | `git` (plus a deploy key and host key only for a private repository) |
+| Needs on the minion | nothing; the release asset is public | `git` (plus a deploy key and host key only for a private repository) |
+| Carries the built frontend | yes | only for the legacy revision |
 | Supports the legacy upstream revision | no | yes |
 
 Prefer `package`. The wheel is the artifact the release pipeline tested, it
@@ -290,8 +297,9 @@ into Salt's onedir environment.
 
 ## Registry access (method: package)
 
-The wheel lives in a private registry, so the minion authenticates before pip
-can reach it:
+The default wheel is a public GitHub release asset and needs no credentials at
+all. Authentication applies only when you point `registry_url` at a private
+registry of your own:
 
 1. Create a read-only access token for your registry. A token that can only
    read packages is enough; do not reuse a publish token.
