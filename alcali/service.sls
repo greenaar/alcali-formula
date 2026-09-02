@@ -2,8 +2,13 @@
 # vim: ft=sls
 ---
 {%- from "alcali/map.jinja" import alcali with context %}
-{%- set legacy_source = alcali.deploy.revision == alcali.legacy.revision %}
+{%- set method = (alcali.deploy.get('method') or 'package')|lower %}
+{%- set source_install = method == 'source' %}
+{%- set legacy_source = source_install and alcali.deploy.revision == alcali.legacy.revision %}
 {%- set python_overrides = alcali.legacy.python_overrides if legacy_source else alcali.python_overrides %}
+{#- An installed wheel is importable from the virtualenv, so the service runs
+    from the deployment directory instead of a checkout. #}
+{%- set working_directory = alcali.deploy.code_directory if source_install else alcali.deploy.directory %}
 
 include:
   - alcali.migrate
@@ -19,14 +24,21 @@ alcali-systemd-unit:
     - context:
         service_name: {{ alcali.service.name }}
         directory: {{ alcali.deploy.directory }}
-        code_directory: {{ alcali.deploy.code_directory }}
+        working_directory: {{ working_directory }}
         virtualenv: {{ alcali.deploy.virtualenv }}
         user: {{ alcali.deploy.user }}
         group: {{ alcali.deploy.group }}
         bind: {{ alcali.gunicorn.bind }}
         port: {{ alcali.gunicorn.port }}
         workers: {{ alcali.gunicorn.workers }}
+        threads: {{ alcali.gunicorn.get("threads") or 0 }}
         timeout: {{ alcali.gunicorn.timeout }}
+        {%- if alcali.gunicorn.get("keyfile") %}
+        keyfile: {{ alcali.gunicorn.keyfile | json }}
+        {%- endif %}
+        {%- if alcali.gunicorn.get("certfile") %}
+        certfile: {{ alcali.gunicorn.certfile | json }}
+        {%- endif %}
     - require:
       - cmd: alcali-python-dependencies
       {% if python_overrides %}
@@ -50,7 +62,9 @@ alcali-service:
     - watch:
       - file: alcali-environment
       - file: alcali-systemd-unit
+      {% if source_install %}
       - git: alcali-source
+      {% endif %}
       {% if legacy_source %}
       - file: alcali-legacy-tls-verification
       {% endif %}

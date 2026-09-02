@@ -1,0 +1,32 @@
+[Unit]
+# Managed by Salt via alcali.docker.
+Description=Alcali Salt administration interface (Compose)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+# Compose is the long-running supervisor here, not systemd: `up -d` returns
+# once the containers are started and Docker's own restart policy keeps them
+# up. RemainAfterExit lets systemctl still report the deployment's state and
+# gives ExecStop somewhere to hang off.
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ docker.directory }}
+TimeoutStartSec={{ docker.start_timeout }}
+{%- if docker.pull %}
+# A pinned tag makes this a no-op; it exists so a re-pushed tag is picked up
+# without editing the unit. Non-fatal: a registry outage should not take the
+# running deployment down on a restart.
+ExecStartPre=-/usr/bin/docker compose --file {{ docker.compose_file }} pull --quiet
+{%- endif %}
+# `up -d` runs the one-shot migration job to completion before starting the
+# application, and recreates only the containers whose configuration changed.
+ExecStart=/usr/bin/docker compose --file {{ docker.compose_file }} up --detach --remove-orphans
+ExecStop=/usr/bin/docker compose --file {{ docker.compose_file }} down
+# Deliberately not `down -v`: the bundled database's volume holds the whole
+# job history, and stopping the service must never be what deletes it.
+ExecReload=/usr/bin/docker compose --file {{ docker.compose_file }} up --detach --remove-orphans
+
+[Install]
+WantedBy=multi-user.target

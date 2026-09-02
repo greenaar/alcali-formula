@@ -1,13 +1,48 @@
 # -*- coding: utf-8 -*-
 # vim: ft=jinja
 
+{#- Merge order, lowest precedence first:
+
+      1. defaults.yml   the formula's own defaults
+      2. pillar alcali  everything else
+
+   This replaces a `grains.filter_by(default_settings, default='alcali',
+   merge=...)` call. strategy='recurse' matches what filter_by's merge= did
+   (salt.utils.dictupdate.update), and merge_lists=False keeps a pillar list
+   replacing rather than extending the default - filter_by never appends.
+
+   `config.get` rather than `pillar.get`: the previous map read the formula's
+   config through config.get, which also searches minion opts and grains, and
+   narrowing that to pillar would be a behaviour change rather than a
+   refactor. #}
 {%- set tplroot = tpldir.split('/')[0] %}
-{%- import_yaml tplroot ~ "/defaults.yml" as default_settings %}
+{%- import_yaml tplroot ~ "/defaults.yml" as defaults %}
 {%- set _config = salt['config.get'](tplroot, default={}) %}
-{%- set config = salt['grains.filter_by'](
-      default_settings,
-      default=tplroot,
-      merge=_config
+{%- set alcali = salt['slsutil.merge'](
+      defaults.get(tplroot, {}),
+      _config,
+      strategy='recurse',
+      merge_lists=False
     )
 %}
-{%- set alcali = config %}
+
+{#- Derived values every state needs, computed once so the four deployment
+    methods cannot drift apart between files. #}
+{%- set _method = (alcali.deploy.get('method') or 'package')|lower %}
+{%- do alcali.update({'method': _method}) %}
+{%- do alcali.update({'managed_locally': _method in ['package', 'source', 'docker']}) %}
+
+{#- Where salt-api calls back to verify a login. Nothing to derive it from
+    when Alcali is external, so it stays null there and master.sls refuses to
+    render a configuration that would silently break every login. #}
+{%- set _verify_url = alcali.salt_master.rest_auth.get('verify_url') %}
+{%- if not _verify_url %}
+{%-   if _method == 'docker' %}
+{%-     set _verify_url = 'http://' ~ alcali.docker.publish_address ~ ':'
+                          ~ alcali.docker.publish_port ~ '/api/token/verify/' %}
+{%-   elif _method in ['package', 'source'] %}
+{%-     set _verify_url = 'http://' ~ alcali.gunicorn.bind ~ ':'
+                          ~ alcali.gunicorn.port ~ '/api/token/verify/' %}
+{%-   endif %}
+{%- endif %}
+{%- do alcali.salt_master.rest_auth.update({'verify_url': _verify_url}) %}

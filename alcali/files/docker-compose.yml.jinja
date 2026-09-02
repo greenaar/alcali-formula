@@ -1,0 +1,123 @@
+# Managed by Salt via alcali.docker. Do not edit locally.
+#
+# The application only: no salt-master and no salt-minion. The master this
+# Alcali talks to is configured separately by alcali.master.
+---
+name: {{ docker.project_name }}
+
+x-alcali: &alcali
+  image: {{ image }}
+  env_file:
+    - {{ docker.directory }}/.env
+  restart: unless-stopped
+{%- if ca_bundle and docker.ca_bundle_source %}
+  volumes:
+    # The CA the master's salt-api certificate chains to. Mounted at the same
+    # path the container is told to use through SALT_CA_BUNDLE.
+    - {{ docker.ca_bundle_path }}:{{ docker.ca_bundle_path }}:ro
+{%- endif %}
+{%- if not docker.bundled_database %}
+  extra_hosts:
+    # An external database reached over the host's own loopback is reached
+    # through this alias, because the container's loopback is the container.
+    - "host.docker.internal:host-gateway"
+{%- endif %}
+  networks:
+    - alcali
+
+services:
+{%- if docker.bundled_database %}
+  db:
+    image: {{ docker.database_image }}
+    restart: unless-stopped
+    command: >-
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    environment:
+      MARIADB_DATABASE: {{ alcali.database.name }}
+      MARIADB_USER: {{ alcali.database.user }}
+      MARIADB_PASSWORD: {{ alcali.database.password }}
+      MARIADB_ROOT_PASSWORD: {{ docker.database_root_password }}
+    volumes:
+      - db-data:/var/lib/mysql
+      # Creates Salt's returner tables on an empty volume. Nothing in it
+      # drops, so it is inert against existing data.
+      - {{ docker.directory }}/initdb:/docker-entrypoint-initdb.d:ro
+    ports:
+      # The Salt master writes job returns here. Published on
+      # alcali:database:host so the master's own returner configuration and
+      # this line cannot disagree.
+      - "{{ alcali.database.host }}:{{ alcali.database.port }}:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - alcali
+{%- endif %}
+
+  # One-shot. Runs to completion before web starts, so a schema change never
+  # races between gunicorn workers. Salt's own returner tables are unmanaged
+  # models and are left alone.
+  #
+  # Everything here is expressed in terms the image has always provided -
+  # manage.py and a shell - rather than a helper script, so that this file
+  # keeps working against whichever published image tag is pinned.
+  migrate:
+    <<: *alcali
+    restart: "no"
+{%- if docker.bundled_database %}
+    depends_on:
+      db:
+        condition: service_healthy
+{%- endif %}
+    # Retries for two minutes: a database that is briefly unreachable should
+    # delay the deployment, not fail it. Each attempt prints its own error.
+    # No shell variables - Compose would interpolate a bare $ before the
+    # shell ever saw it.
+    command:
+      - sh
+      - -c
+      - |
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+          python manage.py migrate --noinput && exit 0
+          echo "migrate failed; retrying in 10s" >&2
+          sleep 10
+        done
+        echo "migrate did not succeed; see the errors above" >&2
+        exit 1
+
+  web:
+    <<: *alcali
+    # gunicorn is not a TLS terminator. Published on
+    # alcali:docker:publish_address, which defaults to loopback; put a
+    # reverse proxy in front of it.
+    ports:
+      - "{{ docker.publish_address }}:{{ docker.publish_port }}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # Any response below 500 is healthy: a strict ALLOWED_HOSTS answers with
+      # 400, which still proves gunicorn is accepting and running Django. The
+      # opener is rebuilt without the error processor so a non-2xx status is
+      # returned rather than raised, which keeps this to one line.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys,urllib.request as r; o=r.build_opener(type('H',(r.HTTPErrorProcessor,),{'http_response':lambda s,q,p:p,'https_response':lambda s,q,p:p})); sys.exit(o.open('http://127.0.0.1:8000/',timeout=5).status>=500)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+networks:
+  alcali:
+{%- if docker.bundled_database %}
+
+volumes:
+  db-data:
+{%- endif %}

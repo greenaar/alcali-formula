@@ -2,16 +2,62 @@
 # vim: ft=yaml
 ---
 alcali:
-  version: 3006.4.0.dev0
+  version: 3008.2.0
   supported_osfingers:
     - Debian-13
     - Ubuntu-24.04
   deploy:
-    repository: https://github.com/latenighttales/alcali.git
-    # Commit referenced by the upstream v3006.3.0 tag.
-    # Modernized candidate once published: 8f07bb66dff6428f833c838ab6f053e71ea16429
-    revision: 92dfc9af57e2fdff0d7f373fbc48be90b08167ec
+    # package:  install the published wheel from the Forgejo PyPI registry.
+    #           The deployed artifact is then exactly the one CI built and
+    #           released, and no source checkout is kept on the minion.
+    # source:   clone the repository and install its requirements. Required
+    #           for the legacy upstream revision, which predates the wheel.
+    # docker:   run the published container image on this host under Compose.
+    #           Nothing Python is installed on the minion.
+    # external: Alcali runs somewhere this formula does not manage. Nothing is
+    #           deployed; only the Salt master wiring under alcali:salt_master
+    #           is applied. Set alcali:salt_master:rest_auth:verify_url to
+    #           wherever that Alcali actually answers.
+    #
+    # docker and external both still need alcali:database and alcali:salt_api
+    # to be correct: the master's returner configuration is rendered from
+    # them.
+    method: package
+
+    package:
+      # Base URL of the Forgejo PyPI registry for the owner holding the
+      # package. The wheel is fetched by its exact file URL, so no index is
+      # consulted for Alcali itself and a package of the same name published
+      # elsewhere cannot shadow it. Dependencies still resolve normally.
+      registry_url: https://git.example.com/api/packages/salt/pypi
+      # Full wheel URL. Derived from registry_url and the version when null.
+      url: null
+      # Credentials for that registry. They are written to the deploy user's
+      # netrc, never passed on a command line. A read-only token is enough.
+      username: null
+      password: null
+      # Defaults to alcali:version when null.
+      version: null
+
+    # Used by method: source only.
+    repository: ssh://git@git.example.com:8222/salt/alcali-modernized.git
+    # Modernized application, release v3008.2.0 on the Forgejo repository.
+    # Upstream v3006.3.0 remains available as the legacy revision below.
+    revision: 14fe53a19aacff688fdc98cffc43b665bb813baf
     force_reset: false
+    # Private key used to clone a private repository over SSH. Accepts a
+    # salt:// path or an absolute path on the minion; null for an anonymous
+    # HTTPS repository.
+    identity: null
+    # Host key pinned for the deploy user before the first clone. Set name to
+    # null when the repository is cloned over HTTPS.
+    known_host:
+      name: git.example.com
+      port: 8222
+      enc: ssh-ed25519
+      # Verified against the scanned key when set; null accepts what the
+      # server presents on first contact.
+      fingerprint: SHA256:eE8cyFih/+oZvnUaQF7WAsbEpDt0p0/xncrEPUnbKyU
     directory: /opt/alcali
     code_directory: /opt/alcali/code
     virtualenv: /opt/alcali/venv
@@ -22,6 +68,9 @@ alcali:
 
   database:
     backend: mysql
+    # Defaults to mysqlclient or psycopg2. Set a -binary variant to install a
+    # prebuilt wheel and drop the compiler and database headers entirely.
+    connector: null
     name: salt
     user: alcali
     password: CHANGE_ME
@@ -39,9 +88,64 @@ alcali:
     url: https://127.0.0.1:8080
     auth: rest
     master_minion_id: master
-    verify_tls: true
+    # true or false forces the behaviour, and works on every Alcali version.
+    #
+    # null omits SALT_VERIFY_TLS entirely and leaves the decision to Alcali,
+    # which verifies a real host and skips verification for a loopback url.
+    # That behaviour arrived in 3008.5.0; earlier versions read a missing
+    # variable as true, so null verifies against loopback there and fails on
+    # the certificate's address mismatch. Use false rather than null unless
+    # alcali:version is 3008.5.0 or newer.
+    verify_tls: null
     ca_bundle: null
     timeout: 30
+
+  # Used by deploy:method: docker only.
+  docker:
+    # Defaults to registry ~ '/alcali:' ~ version when null. Pin a version;
+    # a floating tag makes it impossible to say what is deployed.
+    image: null
+    registry: git.example.com/salt
+    # Credentials for a private registry. Written to the root Docker config,
+    # never passed on a command line.
+    registry_username: null
+    registry_password: null
+    # Pull on every run. Harmless for a pinned tag; leave true so that a
+    # re-pushed tag is picked up.
+    pull: true
+    install_packages: true
+    # Debian 13 and Ubuntu 24.04 both carry a Compose v2 plugin, so no
+    # third-party repository is needed.
+    packages:
+      - docker.io
+      - docker-compose-v2
+    directory: /opt/alcali
+    compose_file: /opt/alcali/docker-compose.yml
+    project_name: alcali
+    # Where the container publishes the application. gunicorn is not the TLS
+    # terminator: keep this on loopback and put a reverse proxy in front.
+    publish_address: 127.0.0.1
+    publish_port: 8000
+    # Run the returner database in this Compose project as well. Off by
+    # default: the master usually already has one, and Alcali should read
+    # that rather than own a second copy. When true, alcali:database:host and
+    # :port are where the container publishes it, and must be an address on
+    # this host.
+    bundled_database: false
+    database_image: mariadb:11.4
+    database_root_password: null
+    # CA the container must trust to reach salt-api, when the master uses an
+    # internal CA. A salt:// source or an absolute path on the minion; it is
+    # mounted read-only and alcali:salt_api:ca_bundle should point at
+    # ca_bundle_path.
+    ca_bundle_source: null
+    ca_bundle_path: /etc/alcali/tls/salt-ca.pem
+    # systemd unit wrapping `docker compose up -d`, so the deployment starts
+    # at boot and can be managed like any other service.
+    service: alcali
+    # Compose waits for the one-shot migration job before starting the
+    # application; this bounds that wait.
+    start_timeout: 300
 
   features:
     ldap: false
@@ -49,8 +153,8 @@ alcali:
 
   python_overrides: []
 
-  # Compatibility settings are applied only while deploy.revision references
-  # the original upstream release. They are skipped automatically for a fork.
+  # Compatibility settings applied only while deploy.revision references the
+  # original upstream release. They are skipped for the modernized source.
   legacy:
     revision: 92dfc9af57e2fdff0d7f373fbc48be90b08167ec
     python_overrides:
@@ -62,6 +166,14 @@ alcali:
     bind: 127.0.0.1
     port: 5000
     workers: 4
+    # Alcali holds an event stream open for every page that is loaded, and a
+    # sync worker is occupied for the whole life of a request. With threads
+    # unset gunicorn runs one sync worker per process, so a handful of open
+    # tabs take every worker and the application stops answering; the streams
+    # are then killed at `timeout` and the browsers reconnect, which is what
+    # makes the connection indicator flap. Setting threads moves gunicorn onto
+    # gthread workers, which can hold many connections per process.
+    threads: 8
     timeout: 300
 
   service:
@@ -92,7 +204,15 @@ alcali:
       - wheel
       - wheel_async
     rest_auth:
-      verify_url: http://127.0.0.1:5000/api/token/verify/
+      # Where salt-api calls back to verify a login. Derived from the
+      # deployment when null: the gunicorn bind for package/source, the
+      # published Compose address for docker. There is nothing to derive it
+      # from for deploy:method: external, so it must be set there.
+      #
+      # This address is resolved by the *master*, not by Alcali. If the two
+      # are on different hosts it has to be the reverse proxy's URL, and the
+      # master has to trust that certificate.
+      verify_url: null
       users:
         admin:
           - '.*'
